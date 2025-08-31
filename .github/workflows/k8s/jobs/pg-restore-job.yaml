@@ -19,9 +19,10 @@ spec:
           export PGPASSWORD=$(cat /mnt/secrets-store/dbpassword) &&
 
           DB_NAME="alpha-${PR_NUMBER}" &&
-          echo "Creating DB $DB_NAME if not exists..." &&
+          echo "Creating DB $DB_NAME..." &&
+          # Create the database, ignore error if it already exists
           psql -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d demopg \
-            -c "SELECT 'CREATE DATABASE \"${DB_NAME}\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec" &&
+            -c "CREATE DATABASE \"${DB_NAME}\";" || true &&
 
           echo "Waiting 30 seconds for backup to be uploaded to S3..." &&
           sleep 30 &&
@@ -48,5 +49,4 @@ spec:
           volumeAttributes:
             secretProviderClass: "rds-secret-provider"
   backoffLimit: 1
-
 
