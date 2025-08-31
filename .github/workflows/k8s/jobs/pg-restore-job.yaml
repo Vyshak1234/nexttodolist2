@@ -1,4 +1,3 @@
-
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -17,21 +16,28 @@ spec:
           apk update && apk add --no-cache aws-cli &&
           # Load DB password from CSI secret
           export PGPASSWORD=$(cat /mnt/secrets-store/dbpassword) &&
-          # Set variables
-          PR_NUMBER="${PR_NUMBER}" &&
-          DB_NAME="alpha-${PR_NUMBER}" &&
-          DUMP_FILE="/tmp/demopg-PR-${PR_NUMBER}.dump" &&
+          # Debug environment variables
           echo "=== Starting restore process ===" &&
-          echo "PR Number: $PR_NUMBER" &&
-          echo "Target Database: $DB_NAME" &&
-          echo "Dump file: $DUMP_FILE" &&
+          echo "Raw PR_NUMBER env var: '$PR_NUMBER'" &&
+          # Set variables with explicit values
+          PR_NUM="$PR_NUMBER" &&
+          DB_NAME="alpha-$PR_NUM" &&
+          DUMP_FILE="/tmp/demopg-PR-$PR_NUM.dump" &&
+          echo "Processed PR Number: '$PR_NUM'" &&
+          echo "Target Database: '$DB_NAME'" &&
+          echo "Dump file: '$DUMP_FILE'" &&
+          # Verify variables are not empty
+          if [ -z "$PR_NUM" ]; then
+            echo "ERROR: PR_NUMBER is empty!" &&
+            exit 1
+          fi &&
           # Create the database, ignore error if it already exists
           echo "Creating database: $DB_NAME" &&
           psql -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d postgres \
-            -c "CREATE DATABASE \"${DB_NAME}\";" || echo "Database might already exist, continuing..." &&
+            -c "CREATE DATABASE \"$DB_NAME\";" || echo "Database might already exist, continuing..." &&
           # Download dump from S3
-          echo "Downloading dump for PR #${PR_NUMBER} from S3..." &&
-          aws s3 cp "s3://acceleraterapptest/demopg-PR-${PR_NUMBER}.dump" "$DUMP_FILE" &&
+          echo "Downloading dump for PR #$PR_NUM from S3..." &&
+          aws s3 cp "s3://acceleraterapptest/demopg-PR-$PR_NUM.dump" "$DUMP_FILE" &&
           # Verify dump file exists and show size
           echo "Verifying dump file..." &&
           ls -la "$DUMP_FILE" &&
