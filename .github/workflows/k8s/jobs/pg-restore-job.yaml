@@ -1,3 +1,4 @@
+
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -14,25 +15,31 @@ spec:
         - |
           # Install awscli
           apk update && apk add --no-cache aws-cli &&
-
           # Load DB password from CSI secret
           export PGPASSWORD=$(cat /mnt/secrets-store/dbpassword) &&
-
+          # Set variables
+          PR_NUMBER="${PR_NUMBER}" &&
           DB_NAME="alpha-${PR_NUMBER}" &&
-          echo "Creating DB $DB_NAME..." &&
-          # Create the database, ignore error if it already exists
-          psql -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d demopg \
-            -c "CREATE DATABASE \"${DB_NAME}\";" || true &&
-
-          echo "Waiting 30 seconds for backup to be uploaded to S3..." &&
-          sleep 30 &&
-
           DUMP_FILE="/tmp/demopg-PR-${PR_NUMBER}.dump" &&
+          echo "=== Starting restore process ===" &&
+          echo "PR Number: $PR_NUMBER" &&
+          echo "Target Database: $DB_NAME" &&
+          echo "Dump file: $DUMP_FILE" &&
+          # Create the database, ignore error if it already exists
+          echo "Creating database: $DB_NAME" &&
+          psql -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d postgres \
+            -c "CREATE DATABASE \"${DB_NAME}\";" || echo "Database might already exist, continuing..." &&
+          # Download dump from S3
           echo "Downloading dump for PR #${PR_NUMBER} from S3..." &&
-          aws s3 cp s3://acceleraterapptest/demopg-PR-${PR_NUMBER}.dump "$DUMP_FILE" &&
-
-          echo "Restoring into $DB_NAME..." &&
-          pg_restore -h demodb.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d "$DB_NAME" "$DUMP_FILE"
+          aws s3 cp "s3://acceleraterapptest/demopg-PR-${PR_NUMBER}.dump" "$DUMP_FILE" &&
+          # Verify dump file exists and show size
+          echo "Verifying dump file..." &&
+          ls -la "$DUMP_FILE" &&
+          # Restore database
+          echo "Restoring database: $DB_NAME..." &&
+          pg_restore -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d "$DB_NAME" -v "$DUMP_FILE" &&
+          echo "=== Restore completed successfully! ===" &&
+          echo "Database $DB_NAME is ready for testing"
         env:
         - name: PR_NUMBER
           value: "${PR_NUMBER}"
@@ -49,4 +56,3 @@ spec:
           volumeAttributes:
             secretProviderClass: "rds-secret-provider"
   backoffLimit: 1
-
