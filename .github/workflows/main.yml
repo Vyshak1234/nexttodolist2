@@ -36,7 +36,7 @@ jobs:
         run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
 
       - name: Apply pg_dump job (with PR number)
-        run: envsubst < .github/workflows/k8s/jobs/pgdump-backup-job.yaml | kubectl apply -f -
+        run: envsubst < .github/workflows/k8s/jobs/pg-backup-job.yaml | kubectl apply -f -
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
 
