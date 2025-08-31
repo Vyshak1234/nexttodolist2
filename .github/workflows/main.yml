@@ -37,7 +37,7 @@ jobs:
 
       - name: Apply pg_dump job (with PR number)
         run: |
-          envsubst < .github/workflows/k8s/jobs/pgdump-backup-job.yaml | kubectl apply -f -
+          envsubst < .github/workflows/k8s/jobs/pg-backup-job.yaml | kubectl apply -f -
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
 
