@@ -18,7 +18,7 @@ jobs:
     name: Backup DB to S3
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Set up kubectl
@@ -36,17 +36,24 @@ jobs:
         run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
 
       - name: Apply pg_dump job (with PR number)
-        run: |
-          envsubst < .github/workflows/k8s/jobs/pg-backup-job.yaml | kubectl apply -f -
+        run: envsubst < .github/workflows/k8s/jobs/pgdump-backup-job.yaml | kubectl apply -f -
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
 
-  postgres-restore:
-    name: Restore DB from S3
+  wait-for-s3:
+    name: Wait for backup to upload
     needs: postgres-backup
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Wait 30 seconds
+        run: sleep 30
+
+  postgres-restore:
+    name: Restore DB from S3
+    needs: wait-for-s3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Set up kubectl
@@ -64,7 +71,7 @@ jobs:
         run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
 
       - name: Apply pg_restore job (with PR number)
-        run: |
-          envsubst < .github/workflows/k8s/jobs/pg-restore-job.yaml | kubectl apply -f -
+        run: envsubst < .github/workflows/k8s/jobs/pg-restore-job.yaml | kubectl apply -f -
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+
