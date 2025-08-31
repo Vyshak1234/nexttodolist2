@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pgdump-upload-pr-${PR_NUMBER}-job
+spec:
+  template:
+    spec:
+      serviceAccountName: rds-backup-sa
+      containers:
+      - name: pgdump
+        image: postgres:17-alpine
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          # Install awscli
+          apk update && apk add --no-cache aws-cli &&
+
+          # Load password from CSI secret
+          export PGPASSWORD=$(cat /mnt/secrets-store/dbpassword) &&
+
+          # Run pg_dump in custom (-Fc) format
+          DUMP_FILE="/tmp/demopg-pr-${PR_NUMBER}.dump" &&
+          pg_dump -Fc -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser --dbname=todolist -f "$DUMP_FILE" &&
+
+          # Upload dump to S3
+          aws s3 cp "$DUMP_FILE" s3://acceleraterapptest/
+        env:
+        - name: PR_NUMBER
+          value: "${PR_NUMBER}"
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: "rds-secret-provider"
+  backoffLimit: 1
