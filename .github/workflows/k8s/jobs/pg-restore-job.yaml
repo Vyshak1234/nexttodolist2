@@ -19,33 +19,32 @@ spec:
           # Debug environment variables
           echo "=== Starting restore process ===" &&
           echo "Raw PR_NUMBER env var: '$PR_NUMBER'" &&
-          # Set variables with explicit values
-          PR_NUM="$PR_NUMBER" &&
-          DB_NAME="alpha-$PR_NUM" &&
-          DUMP_FILE="/tmp/demopg-PR-$PR_NUM.dump" &&
-          echo "Processed PR Number: '$PR_NUM'" &&
-          echo "Target Database: '$DB_NAME'" &&
-          echo "Dump file: '$DUMP_FILE'" &&
-          # Verify variables are not empty
-          if [ -z "$PR_NUM" ]; then
-            echo "ERROR: PR_NUMBER is empty!" &&
+          echo "PR_NUMBER length: ${#PR_NUMBER}" &&
+          printenv | grep PR_NUMBER &&
+          # Use PR_NUMBER directly without reassignment
+          echo "Using PR_NUMBER directly: '$PR_NUMBER'" &&
+          echo "Target Database: 'alpha-$PR_NUMBER'" &&
+          echo "Dump file: '/tmp/demopg-PR-$PR_NUMBER.dump'" &&
+          # Verify PR_NUMBER is not empty
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "" ]; then
+            echo "ERROR: PR_NUMBER is empty or null!" &&
             exit 1
           fi &&
           # Create the database, ignore error if it already exists
-          echo "Creating database: $DB_NAME" &&
+          echo "Creating database: alpha-$PR_NUMBER" &&
           psql -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d postgres \
-            -c "CREATE DATABASE \"$DB_NAME\";" || echo "Database might already exist, continuing..." &&
+            -c "CREATE DATABASE \"alpha-$PR_NUMBER\";" || echo "Database might already exist, continuing..." &&
           # Download dump from S3
-          echo "Downloading dump for PR #$PR_NUM from S3..." &&
-          aws s3 cp "s3://acceleraterapptest/demopg-PR-$PR_NUM.dump" "$DUMP_FILE" &&
+          echo "Downloading dump for PR #$PR_NUMBER from S3..." &&
+          aws s3 cp "s3://acceleraterapptest/demopg-PR-$PR_NUMBER.dump" "/tmp/demopg-PR-$PR_NUMBER.dump" &&
           # Verify dump file exists and show size
           echo "Verifying dump file..." &&
-          ls -la "$DUMP_FILE" &&
+          ls -la "/tmp/demopg-PR-$PR_NUMBER.dump" &&
           # Restore database
-          echo "Restoring database: $DB_NAME..." &&
-          pg_restore -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d "$DB_NAME" -v "$DUMP_FILE" &&
+          echo "Restoring database: alpha-$PR_NUMBER..." &&
+          pg_restore -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d "alpha-$PR_NUMBER" -v "/tmp/demopg-PR-$PR_NUMBER.dump" &&
           echo "=== Restore completed successfully! ===" &&
-          echo "Database $DB_NAME is ready for testing"
+          echo "Database alpha-$PR_NUMBER is ready for testing"
         env:
         - name: PR_NUMBER
           value: "${PR_NUMBER}"
