@@ -1,0 +1,70 @@
+name: PR – Create Alpha env when pr is raised
+
+# Enable OIDC token permission
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  ARGOCD_APPLICATION: ${{ vars.ARGOCD_APPLICATION }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+
+jobs:
+  postgres-backup:
+    name: Backup DB to S3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::533260833584:role/gitactiontest
+          role-session-name: github-actions-backup
+          aws-region: eu-central-1
+          audience: sts.amazonaws.com
+
+      - name: Update kubeconfig for EKS
+        run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
+
+      - name: Apply pg_dump job (with PR number)
+        run: |
+          envsubst < .github/workflows/k8s/jobs/pgdump-backup-job.yaml | kubectl apply -f -
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
+  postgres-restore:
+    name: Restore DB from S3
+    needs: postgres-backup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::533260833584:role/gitactiontest
+          role-session-name: github-actions-restore
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+
+      - name: Update kubeconfig for EKS
+        run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
+
+      - name: Apply pg_restore job (with PR number)
+        run: |
+          envsubst < .github/workflows/k8s/jobs/pg-restore-job.yaml | kubectl apply -f -
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
