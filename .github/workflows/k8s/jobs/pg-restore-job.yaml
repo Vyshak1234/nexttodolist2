@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pgrestore-alpha-${PR_NUMBER}-job
+spec:
+  template:
+    spec:
+      serviceAccountName: rds-backup-sa
+      containers:
+      - name: pgrestore
+        image: postgres:17-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          # Install awscli
+          apk update && apk add --no-cache aws-cli &&
+
+          # Load DB password from CSI secret
+          export PGPASSWORD=$(cat /mnt/secrets-store/dbpassword) &&
+
+          DB_NAME="alpha-${PR_NUMBER}" &&
+          echo "Creating DB $DB_NAME if not exists..." &&
+          psql -h demodb.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d demodb \
+            -c "SELECT 'CREATE DATABASE \"${DB_NAME}\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec" &&
+
+          echo "Downloading dump from S3..." &&
+          aws s3 cp s3://acceleraterapptest/demopg-latest.dump /tmp/demopg.dump &&
+
+          echo "Restoring into $DB_NAME..." &&
+          pg_restore -h demodb.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d "$DB_NAME" /tmp/demopg.dump
+        env:
+        - name: PR_NUMBER
+          value: "${PR_NUMBER}"
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: "rds-secret-provider"
+  backoffLimit: 1
