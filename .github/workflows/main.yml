@@ -215,6 +215,18 @@ jobs:
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
           argocd app list | grep alpha-website-${PR_NUMBER} || echo "Application not visible to ArgoCD CLI"
   
+      - name: Configure Git repository credentials in ArgoCD
+        env:
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN }}  # Add this secret to your repository
+        run: |
+          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+          
+          # Add repository credentials if not already added
+          argocd repo add https://github.com/vyshakBlitz/nexttodolisthelm.git \
+            --username vyshakBlitz \
+            --password $GIT_TOKEN \
+            --insecure-skip-server-verification || echo "Repository already exists or failed to add"
+
       - name: Login to ArgoCD and trigger alpha deployment sync
         run: |
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
