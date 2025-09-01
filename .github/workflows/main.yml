@@ -121,3 +121,89 @@ jobs:
         run: |
           docker build -f Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:alpha-$IMAGE_TAG --no-cache .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:alpha-$IMAGE_TAG
+          
+  deploy-dev:
+    name: Deploy to Dev (ArgoCD – Dev Account)
+    runs-on: ubuntu-latest
+    needs: build-image
+    environment: development
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials via OIDC (Dev Account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::533260833584:role/gitactiontest
+          role-session-name: github-actions-dev
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+
+      - name: Configure kubectl for ArgoCD
+        run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
+
+      - name: Ensure alpha namespace exists
+        run: |
+          kubectl get namespace alpha-${PR_NUMBER} || kubectl create namespace alpha-${PR_NUMBER}
+
+      - name: Deploy ArgoCD Application
+        env:
+          ECR_REGISTRY: ${{ needs.build-image.outputs.ecr_registry }}
+          IMAGE_REPOSITORY: ${{ needs.build-image.outputs.image_repository }}
+          IMAGE_TAG: ${{ needs.build-image.outputs.image_tag }}
+        run: |
+          echo "$ARGOCD_APPLICATION" > application.yaml
+
+          # Annotations for ArgoCD Image Updater
+          yq -i '.metadata.annotations["argocd-image-updater.argoproj.io/write-back-method"] = "argocd"' application.yaml
+          yq -i 'del(.metadata.annotations["argocd-image-updater.argoproj.io/write-back-target"])' application.yaml
+
+          # Namespace changes
+          yq -i ".metadata.namespace = \"alpha-${PR_NUMBER}\"" application.yaml
+          yq -i ".spec.destination.namespace = \"alpha-${PR_NUMBER}\"" application.yaml
+
+          # Helm parameters
+          yq -i ".spec.source.helm.parameters += [{\"name\": \"image.repository\", \"value\": \"${ECR_REGISTRY}/${IMAGE_REPOSITORY}\"}]" application.yaml
+          yq -i ".spec.source.helm.parameters += [{\"name\": \"image.tag\", \"value\": \"alpha-${IMAGE_TAG}\"}]" application.yaml
+
+          # Update ingress host to gitaction.dev.stackgen.io
+          yq -i '.spec.source.helm.parameters += [{"name": "ingress.hosts[0].host", "value": "gitaction.dev.stackgenie.io"}]' application.yaml
+
+          # Sync policy changes
+          yq -i '(.spec.syncPolicy.syncOptions[] | select(. == "CreateNamespace=false")) = "CreateNamespace=true"' application.yaml
+          yq -i '.spec.syncPolicy.automated.selfHeal = false' application.yaml
+
+          # Release name
+          yq -i ".spec.source.helm.releaseName = \"alpha-website-${PR_NUMBER}\"" application.yaml
+
+          kubectl apply -f application.yaml
+
+      - name: Install ArgoCD CLI
+        run: |
+          wget -O argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+          rm argocd-linux-amd64
+          argocd version --client
+
+      - name: Login to ArgoCD and trigger alpha deployment sync
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER }}
+          ARGOCD_USERNAME: ${{ secrets.ARGOCD_USERNAME }}
+          ARGOCD_PASSWORD: ${{ secrets.ARGOCD_PASSWORD }}
+        run: |
+          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+          argocd app sync alpha-website-${PR_NUMBER} --force
+
+      - name: Wait for alpha deployment to complete
+        run: |
+          argocd app wait alpha-website-${PR_NUMBER} --timeout 300
+          argocd app get alpha-website-${PR_NUMBER}
+
+      - name: Verify alpha namespace deployment
+        run: |
+          kubectl get pods -n alpha-${PR_NUMBER} -o wide || true
+          kubectl get services -n alpha-${PR_NUMBER} || true
+          kubectl get deployments -n alpha-${PR_NUMBER} || true
+          kubectl get app alpha-website-${PR_NUMBER} -n argocd -o yaml | yq eval '.status' - || true
+          echo "Preview domain for this PR deployed gitaction.dev.stackgenie.io"
+
