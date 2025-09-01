@@ -94,6 +94,16 @@ jobs:
           role-session-name: github-actions-restore
           aws-region: us-east-1
           audience: sts.amazonaws.com
+
+      - name: Update kubeconfig for EKS
+        run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region us-east-1
+
+      - name: Delete temporary pgdump and pgrestore jobs
+        run: |
+          kubectl delete job pgdump-upload-pr-${PR_NUMBER}-job --ignore-not-found
+          kubectl delete job pgrestore-alpha-${PR_NUMBER}-job --ignore-not-found
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           
       - name: Login to Amazon ECR
         id: login-ecr
