@@ -171,9 +171,10 @@ jobs:
           yq -i '.metadata.annotations["argocd-image-updater.argoproj.io/write-back-method"] = "argocd"' application.yaml
           yq -i 'del(.metadata.annotations["argocd-image-updater.argoproj.io/write-back-target"])' application.yaml
   
-          # Namespace changes
+          # CRITICAL FIX: Change the application name to match what we're trying to sync
           yq -i ".metadata.name = \"alpha-website-${PR_NUMBER}\"" application.yaml
-          # Keep ArgoCD application in argocd namespace, only change destination
+          
+          # Namespace changes - Keep ArgoCD application in argocd namespace
           yq -i ".metadata.namespace = \"argocd\"" application.yaml
           yq -i ".spec.destination.namespace = \"alpha-${PR_NUMBER}\"" application.yaml
   
@@ -191,6 +192,11 @@ jobs:
           # Release name
           yq -i ".spec.source.helm.releaseName = \"alpha-website-${PR_NUMBER}\"" application.yaml
   
+          # Debug: Show the final application.yaml
+          echo "=== Final application.yaml ==="
+          cat application.yaml
+          echo "============================="
+  
           kubectl apply -f application.yaml
   
       - name: Install ArgoCD CLI
@@ -199,6 +205,15 @@ jobs:
           sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
           rm argocd-linux-amd64
           argocd version --client
+  
+      - name: Verify ArgoCD application was created
+        run: |
+          echo "Waiting for application to be created..."
+          sleep 10
+          echo "Checking if application exists..."
+          kubectl get application alpha-website-${PR_NUMBER} -n argocd || echo "Application not found in Kubernetes"
+          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+          argocd app list | grep alpha-website-${PR_NUMBER} || echo "Application not visible to ArgoCD CLI"
   
       - name: Login to ArgoCD and trigger alpha deployment sync
         run: |
@@ -215,6 +230,4 @@ jobs:
           kubectl get pods -n alpha-${PR_NUMBER} -o wide || true
           kubectl get services -n alpha-${PR_NUMBER} || true
           kubectl get deployments -n alpha-${PR_NUMBER} || true
-          kubectl get app alpha-website-${PR_NUMBER} -n argocd -o yaml | yq eval '.status' - || true
-  
-  
+          kubectl get application alpha-website-${PR_NUMBER} -n argocd -o yaml | yq eval '.status' - || true
