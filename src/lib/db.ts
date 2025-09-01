@@ -1,10 +1,21 @@
 import { Pool, QueryResult, QueryResultRow } from "pg";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("rds.amazonaws.com")
+// Determine database connection dynamically
+const connectionString =
+  process.env.DATABASE_URL ||
+  `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}` +
+    `@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+
+// Detect if we need SSL (for RDS)
+const ssl =
+  process.env.DB_HOST?.includes("rds.amazonaws.com") || connectionString.includes("rds.amazonaws.com")
     ? { rejectUnauthorized: false }
-    : undefined,
+    : undefined;
+
+// Create pool
+const pool = new Pool({
+  connectionString,
+  ssl,
 });
 
 export async function query<T extends QueryResultRow = QueryResultRow>(
@@ -13,3 +24,4 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 ): Promise<QueryResult<T>> {
   return pool.query<T>(text, params);
 }
+
