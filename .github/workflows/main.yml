@@ -75,3 +75,39 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
 
+  build-image:
+    name: Build and Push Images (Common ECR Account)
+    runs-on: ubuntu-latest
+    needs: postgres-restore
+    outputs:
+      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
+      image_repository: acceleraterapp
+      image_tag: ${{ steps.set-tag.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::533260833584:role/gitactiontest
+          role-session-name: github-actions-restore
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        
+      - name: Set image tag
+        id: set-tag
+        run: echo "image_tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push website backend image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: acceleterapptestl
+          IMAGE_TAG: ${{ steps.set-tag.outputs.image_tag }}
+        run: |
+          docker build -f Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:alpha-$IMAGE_TAG --no-cache .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:alpha-$IMAGE_TAG
