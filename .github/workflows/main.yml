@@ -172,7 +172,9 @@ jobs:
           yq -i 'del(.metadata.annotations["argocd-image-updater.argoproj.io/write-back-target"])' application.yaml
   
           # Namespace changes
-          yq -i ".metadata.namespace = \"alpha-${PR_NUMBER}\"" application.yaml
+          yq -i ".metadata.name = \"alpha-website-${PR_NUMBER}\"" application.yaml
+          # Keep ArgoCD application in argocd namespace, only change destination
+          yq -i ".metadata.namespace = \"argocd\"" application.yaml
           yq -i ".spec.destination.namespace = \"alpha-${PR_NUMBER}\"" application.yaml
   
           # Helm parameters
