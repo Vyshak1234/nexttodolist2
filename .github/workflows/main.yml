@@ -230,6 +230,7 @@ jobs:
       - name: Login to ArgoCD and trigger alpha deployment sync
         run: |
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+          argocd app terminate-op alpha-website-${PR_NUMBER} || true
           argocd app sync alpha-website-${PR_NUMBER} --force
   
       - name: Wait for alpha deployment to complete
