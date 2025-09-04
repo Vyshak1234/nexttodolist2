@@ -157,8 +157,35 @@ jobs:
   
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           echo "PREVIEW_DOMAIN=$PREVIEW_DOMAIN" >> $GITHUB_ENV
-          echo "Using fixed domain for now: gitaction.dev.stackgenie.io"
-  
+
+      
+      - name: Get LoadBalancer DNS
+        id: get-lb
+        run: |
+          LB_HOSTNAME=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "LB_HOSTNAME=$LB_HOSTNAME" >> $GITHUB_ENV
+
+      - name: Create Route53 Record
+        run: |
+          cat > change-batch.json <<EOF
+          {
+            "Comment": "Add/Update record for PR preview",
+            "Changes": [{
+              "Action": "UPSERT",
+              "ResourceRecordSet": {
+                "Name": "${PREVIEW_DOMAIN}",
+                "Type": "CNAME",
+                "TTL": 60,
+                "ResourceRecords": [{ "Value": "${LB_HOSTNAME}" }]
+              }
+            }]
+          }
+          EOF
+
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id Z0123456789ABCDEF \
+            --change-batch file://change-batch.json
+
       - name: Deploy ArgoCD Application
         env:
           ECR_REGISTRY: ${{ needs.build-image.outputs.ecr_registry }}
@@ -183,7 +210,8 @@ jobs:
           yq -i ".spec.source.helm.parameters += [{\"name\": \"image.tag\", \"value\": \"alpha-${IMAGE_TAG}\"}]" application.yaml
   
           # Update ingress host to fixed domain (preview domain can be used later)
-          yq -i '.spec.source.helm.parameters += [{"name": "ingress.hosts[0].host", "value": "gitaction.dev.stackgenie.io"}]' application.yaml
+          yq -i '.spec.source.helm.parameters += [{"name": "ingress.hosts[0].host", "value": strenv(PREVIEW_DOMAIN)}]' application.yaml
+
   
           # Sync policy changes
           yq -i '(.spec.syncPolicy.syncOptions[] | select(. == "CreateNamespace=false")) = "CreateNamespace=true"' application.yaml
