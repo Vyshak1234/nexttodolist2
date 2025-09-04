@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pgdelete-alpha-${PR_NUMBER}-job
+spec:
+  template:
+    spec:
+      serviceAccountName: rds-backup-sa
+      containers:
+      - name: pgdelete
+        image: postgres:17-alpine
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          # Install awscli
+          apk update && apk add --no-cache aws-cli &&
+          # Load DB password from CSI secret
+          export PGPASSWORD=$(cat /mnt/secrets-store/dbpassword) &&
+          echo "=== Starting delete process for PR ${PR_NUMBER} ===" &&
+          # Safety check: PR_NUMBER must not be empty
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "" ]; then
+            echo "ERROR: PR_NUMBER is empty or null!" &&
+            exit 1
+          fi &&
+          # Drop database
+          echo "Dropping database: alpha-$PR_NUMBER" &&
+          psql -h demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com -U adminuser -d demopg \
+            -c "DROP DATABASE IF EXISTS \"alpha-$PR_NUMBER\";" &&
+          echo "=== Database alpha-$PR_NUMBER deleted successfully ==="
+        env:
+        - name: PR_NUMBER
+          value: "${PR_NUMBER}"
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: "rds-secret-provider"
+  backoffLimit: 1
