@@ -1,0 +1,79 @@
+name: PR – Cleanup Alpha env when PR is closed
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  pull_request:
+    types: [closed]
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  ARGOCD_APPLICATION: alpha-website-${{ github.event.pull_request.number }}
+  AWS_REGION: us-east-1
+  HOSTED_ZONE_ID: Z01491701L37PMNAQJ3Q9
+
+jobs:
+  cleanup:
+    name: Cleanup PR Environment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::533260833584:role/gitactiontest
+          role-session-name: github-actions-cleanup
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Update kubeconfig for EKS
+        run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region $AWS_REGION
+
+      - name: Install ArgoCD CLI
+        run: |
+          wget -O argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+          rm argocd-linux-amd64
+
+      - name: Delete ArgoCD Application
+        run: |
+          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure || true
+          argocd app delete $ARGOCD_APPLICATION --yes || echo "App not found"
+          kubectl delete application $ARGOCD_APPLICATION -n argocd --ignore-not-found
+
+      - name: Delete Namespace
+        run: kubectl delete namespace alpha-${PR_NUMBER} --ignore-not-found
+
+      - name: Delete Preview Database
+        run: |
+          kubectl apply -f .github/workflows/k8s/jobs/pg-delete-job.yaml
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
+      - name: Delete Route53 Record
+        run: |
+          BRANCH_NAME=$(echo "${GITHUB_HEAD_REF:-${GITHUB_REF##*/}}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+          PREVIEW_DOMAIN="${BRANCH_NAME}.cms-alpha-${PR_NUMBER}.dev.stackgenie.io"
+
+          cat > change-batch.json <<EOF
+          {
+            "Comment": "Delete record for PR preview",
+            "Changes": [{
+              "Action": "DELETE",
+              "ResourceRecordSet": {
+                "Name": "${PREVIEW_DOMAIN}",
+                "Type": "CNAME",
+                "TTL": 60,
+                "ResourceRecords": [{ "Value": "$(aws elb describe-load-balancers --query 'LoadBalancerDescriptions[0].DNSName' --output text)" }]
+              }
+            }]
+          }
+          EOF
+
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id $HOSTED_ZONE_ID \
+            --change-batch file://change-batch.json || echo "DNS cleanup failed"
