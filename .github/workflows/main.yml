@@ -183,7 +183,7 @@ jobs:
           EOF
 
           aws route53 change-resource-record-sets \
-            --hosted-zone-id Z0123456789ABCDEF \
+            --hosted-zone-id Z01491701L37PMNAQJ3Q9 \
             --change-batch file://change-batch.json
 
       - name: Deploy ArgoCD Application
