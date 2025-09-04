@@ -153,7 +153,7 @@ jobs:
       - name: Generate preview domain
         run: |
           BRANCH_NAME=$(echo "${GITHUB_HEAD_REF:-${GITHUB_REF##*/}}" | tr '/' '-')
-          PREVIEW_DOMAIN="${BRANCH_NAME}.cms-alpha-${PR_NUMBER}.acceleratorapp.co"
+          PREVIEW_DOMAIN="${BRANCH_NAME}.cms-alpha-${PR_NUMBER}.dev.stackgenie.io"
   
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           echo "PREVIEW_DOMAIN=$PREVIEW_DOMAIN" >> $GITHUB_ENV
