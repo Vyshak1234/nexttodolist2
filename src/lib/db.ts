@@ -1,18 +1,29 @@
 import { Pool, QueryResult, QueryResultRow } from "pg";
 
-// Determine database connection dynamically
-const connectionString =
-  process.env.DATABASE_URL ||
-  `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}` +
-    `@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+// Read env vars directly from AWS Secret Manager sync (or Kubernetes secret)
+const {
+  DATABASE_URL,
+  host,
+  port,
+  username,
+  password,
+  dbname,
+} = process.env;
 
-// Detect if we need SSL (for RDS)
+// Build connection string
+const connectionString =
+  DATABASE_URL ||
+  `postgres://${encodeURIComponent(username || "")}:${encodeURIComponent(
+    password || ""
+  )}@${host}:${port || 5432}/${dbname}`;
+
+// Enable SSL automatically for RDS
 const ssl =
-  process.env.DB_HOST?.includes("rds.amazonaws.com") || connectionString.includes("rds.amazonaws.com")
+  host?.includes("rds.amazonaws.com") || connectionString.includes("rds.amazonaws.com")
     ? { rejectUnauthorized: false }
     : undefined;
 
-// Create pool
+// Create connection pool
 const pool = new Pool({
   connectionString,
   ssl,
@@ -24,4 +35,3 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 ): Promise<QueryResult<T>> {
   return pool.query<T>(text, params);
 }
-
