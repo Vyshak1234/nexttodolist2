@@ -1,6 +1,5 @@
 name: PR – Create Alpha env when PR is raised
 
-# Enable OIDC token permission
 permissions:
   id-token: write
   contents: read
@@ -149,6 +148,41 @@ jobs:
       - name: Ensure alpha namespace exists
         run: |
           kubectl get namespace alpha-${PR_NUMBER} || kubectl create namespace alpha-${PR_NUMBER}
+
+      - name: Fetch DB credentials from Secrets Manager   # ✅ FIXED INDENTATION
+        id: fetch-secrets
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id rds/acceleraterapp/dev \
+            --region us-east-1 \
+            --query SecretString --output text)
+
+          DB_HOST=$(echo $SECRET_JSON | jq -r .host)
+          DB_PORT=$(echo $SECRET_JSON | jq -r .port)
+          DB_USER=$(echo $SECRET_JSON | jq -r .username)
+          DB_PASSWORD=$(echo $SECRET_JSON | jq -r .password)
+
+          echo "DB_HOST=$DB_HOST" >> $GITHUB_ENV
+          echo "DB_PORT=$DB_PORT" >> $GITHUB_ENV
+          echo "DB_USER=$DB_USER" >> $GITHUB_ENV
+          echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_ENV
+
+      - name: Create Kubernetes Secret
+        run: |
+          kubectl create secret generic rds-alpha-${PR_NUMBER}-secret \
+            --from-literal=DB_HOST=${DB_HOST} \
+            --from-literal=DB_PORT=${DB_PORT} \
+            --from-literal=DB_USER=${DB_USER} \
+            --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
+            --from-literal=DB_NAME=alpha-${PR_NUMBER} \
+            -n alpha-${PR_NUMBER} \
+            --dry-run=client -o yaml | kubectl apply -f -
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DB_HOST: ${{ env.DB_HOST }}
+          DB_PORT: ${{ env.DB_PORT }}
+          DB_USER: ${{ env.DB_USER }}
+          DB_PASSWORD: ${{ env.DB_PASSWORD }}
   
       - name: Generate preview domain
         run: |
@@ -197,29 +231,27 @@ jobs:
           yq -i '.metadata.annotations["argocd-image-updater.argoproj.io/write-back-method"] = "argocd"' application.yaml
           yq -i 'del(.metadata.annotations["argocd-image-updater.argoproj.io/write-back-target"])' application.yaml
   
-          # CRITICAL FIX: Change the application name to match what we're trying to sync
+          # Change application name
           yq -i ".metadata.name = \"alpha-website-${PR_NUMBER}\"" application.yaml
           
-          # Namespace changes - Keep ArgoCD application in argocd namespace
+          # Namespace changes
           yq -i ".metadata.namespace = \"argocd\"" application.yaml
           yq -i ".spec.destination.namespace = \"alpha-${PR_NUMBER}\"" application.yaml
   
           # Helm parameters
           yq -i ".spec.source.helm.parameters += [{\"name\": \"image.repository\", \"value\": \"${ECR_REGISTRY}/${IMAGE_REPOSITORY}\"}]" application.yaml
           yq -i ".spec.source.helm.parameters += [{\"name\": \"image.tag\", \"value\": \"alpha-${IMAGE_TAG}\"}]" application.yaml
-  
-          # Update ingress host to fixed domain (preview domain can be used later)
           yq -i '.spec.source.helm.parameters += [{"name": "ingress.hosts[0].host", "value": strenv(PREVIEW_DOMAIN)}]' application.yaml
+          yq -i ".spec.source.helm.parameters += [{\"name\": \"envFrom[0].secretRef.name\", \"value\": \"rds-alpha-${PR_NUMBER}-secret\"}]" application.yaml
 
-  
-          # Sync policy changes
-          yq -i '(.spec.syncPolicy.syncOptions[] | select(. == "CreateNamespace=false")) = "CreateNamespace=true"' application.yaml
+          # ✅ FIXED yq syncOptions handling
+          yq -i '.spec.syncPolicy.syncOptions += ["CreateNamespace=true"]' application.yaml
           yq -i '.spec.syncPolicy.automated.selfHeal = false' application.yaml
   
           # Release name
           yq -i ".spec.source.helm.releaseName = \"alpha-website-${PR_NUMBER}\"" application.yaml
   
-          # Debug: Show the final application.yaml
+          # Debug
           echo "=== Final application.yaml ==="
           cat application.yaml
           echo "============================="
@@ -237,28 +269,32 @@ jobs:
         run: |
           echo "Waiting for application to be created..."
           sleep 10
-          echo "Checking if application exists..."
-          kubectl get application alpha-website-${PR_NUMBER} -n argocd || echo "Application not found in Kubernetes"
-          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
-          argocd app list | grep alpha-website-${PR_NUMBER} || echo "Application not visible to ArgoCD CLI"
+          kubectl get application alpha-website-${PR_NUMBER} -n argocd || echo "App not found"
   
-      - name: Configure Git repository credentials in ArgoCD
+      - name: Configure Git repository credentials in ArgoCD   # ✅ repo update
         env:
-          GIT_TOKEN: ${{ secrets.GIT_TOKEN }}  # Add this secret to your repository
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+        run: |
+          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+          argocd repo update https://github.com/vyshakBlitz/nexttodolisthelm.git \
+            --username vyshakBlitz \
+            --password $GIT_TOKEN \
+            --insecure-skip-server-verification
+  
+      - name: Login to ArgoCD and trigger alpha deployment sync   # ✅ retry loop
         run: |
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
           
-          # Add repository credentials if not already added
-          argocd repo add https://github.com/vyshakBlitz/nexttodolisthelm.git \
-            --username vyshakBlitz \
-            --password $GIT_TOKEN \
-            --insecure-skip-server-verification || echo "Repository already exists or failed to add"
-
-      - name: Login to ArgoCD and trigger alpha deployment sync
-        run: |
-          argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
-          argocd app terminate-op alpha-website-${PR_NUMBER} || true
-          argocd app sync alpha-website-${PR_NUMBER} --force
+          for i in {1..5}; do
+            if argocd app get alpha-website-${PR_NUMBER} >/dev/null 2>&1; then
+              echo "Application found, syncing..."
+              argocd app terminate-op alpha-website-${PR_NUMBER} || true
+              argocd app sync alpha-website-${PR_NUMBER} --force && break
+            else
+              echo "Application not ready yet, retrying in 15s..."
+              sleep 15
+            fi
+          done
   
       - name: Wait for alpha deployment to complete
         run: |
