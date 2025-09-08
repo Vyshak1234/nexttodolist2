@@ -276,34 +276,47 @@ jobs:
           GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
         run: |
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
+          
+          # Update existing repo credentials (safe if already added)
           argocd repo update https://github.com/vyshakBlitz/nexttodolisthelm.git \
             --username vyshakBlitz \
             --password $GIT_TOKEN \
-            --insecure-skip-server-verification
-  
+            --insecure || echo "⚠️ Repo update failed or not needed"
+
       - name: Login to ArgoCD and trigger alpha deployment sync   # ✅ retry loop
         run: |
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure
           
           for i in {1..5}; do
             if argocd app get alpha-website-${PR_NUMBER} >/dev/null 2>&1; then
-              echo "Application found, syncing..."
+              echo "✅ Application alpha-website-${PR_NUMBER} found, syncing..."
               argocd app terminate-op alpha-website-${PR_NUMBER} || true
-              argocd app sync alpha-website-${PR_NUMBER} --force && break
+              if argocd app sync alpha-website-${PR_NUMBER} --force; then
+                echo "✅ Sync started successfully"
+                break
+              fi
             else
-              echo "Application not ready yet, retrying in 15s..."
+              echo "⏳ Application alpha-website-${PR_NUMBER} not ready yet, retrying in 15s..."
               sleep 15
             fi
           done
-  
+
       - name: Wait for alpha deployment to complete
         run: |
-          argocd app wait alpha-website-${PR_NUMBER} --timeout 300
+          echo "⏳ Waiting for alpha-website-${PR_NUMBER} to finish syncing..."
+          if ! argocd app wait alpha-website-${PR_NUMBER} --timeout 600 --health; then
+            echo "❌ App failed to become healthy in time"
+            argocd app get alpha-website-${PR_NUMBER}
+            exit 1
+          fi
+          echo "✅ App sync and health check completed"
           argocd app get alpha-website-${PR_NUMBER}
-  
+
       - name: Verify alpha namespace deployment
         run: |
+          echo "🔍 Checking resources in namespace alpha-${PR_NUMBER}..."
           kubectl get pods -n alpha-${PR_NUMBER} -o wide || true
           kubectl get services -n alpha-${PR_NUMBER} || true
           kubectl get deployments -n alpha-${PR_NUMBER} || true
+          echo "🔍 Checking ArgoCD Application status..."
           kubectl get application alpha-website-${PR_NUMBER} -n argocd -o yaml | yq eval '.status' - || true
