@@ -28,7 +28,6 @@ jobs:
           role-to-assume: arn:aws:iam::533260833584:role/gitactiontest
           role-session-name: github-actions-cleanup
           aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
 
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name vyshak-gitactiontest-01a2b3c4 --region $AWS_REGION
@@ -40,6 +39,10 @@ jobs:
           rm argocd-linux-amd64
 
       - name: Delete ArgoCD Application
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_USERNAME: ${{ secrets.ARGOCD_USERNAME }}
+          ARGOCD_PASSWORD: ${{ secrets.ARGOCD_PASSWORD }}
         run: |
           argocd login $ARGOCD_SERVER --username $ARGOCD_USERNAME --password $ARGOCD_PASSWORD --insecure || true
           argocd app delete $ARGOCD_APPLICATION --yes || echo "App not found"
@@ -60,8 +63,10 @@ jobs:
 
       - name: Delete Route53 Record
         run: |
-          BRANCH_NAME=$(echo "${GITHUB_HEAD_REF:-${GITHUB_REF##*/}}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+          BRANCH_NAME=$(echo "${{ github.event.pull_request.head.ref }}" | tr '/' '-' | tr '[:upper:]' '[:lower:]')
           PREVIEW_DOMAIN="${BRANCH_NAME}.cms-alpha-${PR_NUMBER}.dev.stackgenie.io"
+
+          LOAD_BALANCER_DNS=$(aws elbv2 describe-load-balancers --query 'LoadBalancers[0].DNSName' --output text)
 
           cat > change-batch.json <<EOF
           {
@@ -72,7 +77,7 @@ jobs:
                 "Name": "${PREVIEW_DOMAIN}",
                 "Type": "CNAME",
                 "TTL": 60,
-                "ResourceRecords": [{ "Value": "$(aws elb describe-load-balancers --query 'LoadBalancerDescriptions[0].DNSName' --output text)" }]
+                "ResourceRecords": [{ "Value": "${LOAD_BALANCER_DNS}" }]
               }
             }]
           }
