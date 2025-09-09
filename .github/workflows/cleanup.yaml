@@ -45,18 +45,18 @@ jobs:
           argocd app delete $ARGOCD_APPLICATION --yes || echo "App not found"
           kubectl delete application $ARGOCD_APPLICATION -n argocd --ignore-not-found
 
+      - name: Delete Preview Database
+        run: |
+          envsubst < .github/workflows/k8s/jobs/pg-delete-job.yaml | kubectl apply -f -
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
       - name: Delete Secrets
         run: |
           kubectl delete secret rds-alpha-${PR_NUMBER}-secret -n alpha-${PR_NUMBER} --ignore-not-found
 
       - name: Delete Namespace
         run: kubectl delete namespace alpha-${PR_NUMBER} --ignore-not-found
-
-      - name: Delete Preview Database
-        run: |
-          kubectl apply -f .github/workflows/k8s/jobs/pg-delete-job.yaml
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Delete Route53 Record
         run: |
