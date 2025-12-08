@@ -1,0 +1,29 @@
+import { Pool, QueryResult, QueryResultRow } from "pg";
+
+// Hardcoded database credentials
+const host = "demopg.cod55klsl2aw.us-east-1.rds.amazonaws.com";
+const port = 5432;
+const username = "adminuser";
+const password = "kNIx#hv0scGPtCijM5>V<DGwRy6~";
+const dbname = "todolist";
+
+// Build connection string
+const connectionString = `postgres://${encodeURIComponent(username)}:${encodeURIComponent(
+  password
+)}@${host}:${port}/${dbname}`;
+
+// Enable SSL automatically for RDS
+const ssl = host.includes("rds.amazonaws.com") ? { rejectUnauthorized: false } : undefined;
+
+// Create connection pool
+const pool = new Pool({
+  connectionString,
+  ssl,
+});
+
+export async function query<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: unknown[]
+): Promise<QueryResult<T>> {
+  return pool.query<T>(text, params);
+}
